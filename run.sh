@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=0,1 python train.py \
+CUDA_VISIBLE_DEVICES=0 python train.py \
         --output_dir ./train_models/roberta-base \
         --model_type roberta \
         --model_name_or_path roberta-base \

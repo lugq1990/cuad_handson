@@ -426,6 +426,25 @@ def evaluate(args, model, tokenizer, prefix=""):
     return results
 
 
+def get_prediction(text, model, tokenizer):
+    token_text = tokenizer.tokenize(text)
+    inputs = {
+                "input_ids": token_text[0],
+                "attention_mask": token_text[1],
+                "token_type_ids": token_text[2],
+            }
+    out = model(**inputs)
+    start = out.start_logits
+    end = out.end_logits
+    
+    start_index = start.argmax()
+    end_index = end.argmax()
+    
+    return start_index, end_index
+    
+    
+
+
 def load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=False):
     if args.local_rank not in [-1, 0] and not evaluate:
         # Make sure only the first process in distributed training process the dataset, and the others will use the cache
