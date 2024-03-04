@@ -1,6 +1,8 @@
 import json
 import pandas as pd
-from datasets import Dataset
+from datasets import Dataset, load_from_disk
+import torch
+import os
 
 from transformers import TrainingArguments
 from transformers import Trainer
@@ -14,6 +16,10 @@ stride = 128
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 model = AutoModelForQuestionAnswering.from_pretrained(model_id)
 
+# put model to GPU
+device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+
+model.to(device)
 
 def load_json(file_name):
     with open(file_name, 'r') as f:
@@ -111,10 +117,23 @@ def preprocess_training_examples(examples):
     return inputs
 
 
+def get_dataset(json_path, data_path='tmp_data'):
+    if os.path.exists(data_path):
+        print("Start to load dataset from disk!")
+        dataset = load_from_disk(data_path)
+    else:
+        print("Start to build dataset based on JSON file")
+        real_data = get_trained_data(json_path)
+        dataset  = _get_dataset(real_data)
+        dataset = dataset.map(preprocess_training_examples, batched=True, remove_columns=dataset.column_names)
+         # split to train and test dataset
+        split_ds = dataset.train_test_split(test_size=.1)
+        split_ds.save_to_disk(data_path)
+    return dataset
+
+
 def _training():
-    real_data = get_trained_data()
-    dataset  = _get_dataset(real_data)
-    train_ds_new = dataset.map(preprocess_training_examples, batched=True, remove_columns=dataset.column_names)
+    dataset = get_dataset(json_path='sample.json')
 
     args = TrainingArguments(
         "bert-finetuned-squad",
@@ -130,8 +149,8 @@ def _training():
     trainer = Trainer(
         model=model,
         args=args,
-        train_dataset=train_ds_new,
-        eval_dataset=train_ds_new,
+        train_dataset=dataset['train'],
+        eval_dataset=dataset['train'],
         tokenizer=tokenizer,
     )
     trainer.train()
