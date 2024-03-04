@@ -18,6 +18,9 @@ A diagram for data flow and user interaction.
 
 ### Todo lists:
 1. Define a model list that will do the clause extraction based on the question answering task.
+   - Bert
+   - Bart
+   - DistilBERT
 2. Dump each model parameters evaluation result into a file to do comparation
 3. Estimate the data preparation step will take how long -->> based on the estimation to do the cache
    1. 10 train files will takes 10 mins to get Dataset
