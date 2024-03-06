@@ -21,6 +21,11 @@ device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cp
 
 model.to(device)
 
+
+# get current folder path
+cur_path = os.path.abspath(__file__)
+
+
 def load_json(file_name):
     with open(file_name, 'r') as f:
         data = json.loads(f.read())
@@ -132,29 +137,67 @@ def get_dataset(json_path, data_path='tmp_data'):
     return dataset
 
 
-def _training():
-    dataset = get_dataset(json_path='sample.json')
+def _get_latest_checkpoint(folder_path):
+    """Used to get the latest checkpoint to get the latest trained model.
 
-    args = TrainingArguments(
-        "bert-finetuned-squad",
-        evaluation_strategy="no",
-        save_strategy="epoch",
-        learning_rate=2e-5,
-        num_train_epochs=3,
-        weight_decay=0.01,
-        fp16=True,
-        push_to_hub=False,
-    )
+    Args:
+        folder_path (_type_): _description_
 
-    trainer = Trainer(
-        model=model,
-        args=args,
-        train_dataset=dataset['train'],
-        eval_dataset=dataset['train'],
-        tokenizer=tokenizer,
-    )
-    trainer.train()
+    Returns:
+        _type_: _description_
+    """
+    check_point_folder_list = os.listdir(folder_path)
+    if len(check_point_folder_list) == 0:
+        print("No checkpoint folder get")
+        return
+    # get the lastest one
+    latest_folder = sorted(check_point_folder_list, key=lambda x: x.split('-')[-1], reverse=True)
+
+    return latest_folder[0]
+
+
+def _dump_json_metric(model_name, info_dict, metric_path='metrics', ):
+    # after the full process finsished, then we could loop this folder to get the training info, 
+    # and sort the the metrics, then to get the best trained model, use this model to do prediction.
+    metric_path = os.path.join(cur_path, metric_path)
+    if not os.path.exists(metric_path):
+        os.mkdirs(metric_path, exists=True)
+    model_path = os.path.join(metric_path, model_name)
+    with open(model_path, 'w') as f:
+        print("Start to dump json to metric path: {}".format(model_path))
+        f.write(json.dumps(info_dict))
+        
+
+
+dataset = get_dataset(json_path='sample.json')
+
+# batch_size 64 is tested will cause 10GB GPU memory
+args = TrainingArguments(
+    model_id,
+    evaluation_strategy="epoch",
+    save_strategy="epoch",
+    learning_rate=2e-5,
+    num_train_epochs=1,
+    weight_decay=0.01,
+    per_device_train_batch_size=64,
+    fp16=True,
+    push_to_hub=False,
+)
+
+
+trainer = Trainer(
+    model=model,
+    args=args,
+    train_dataset=dataset['train'],
+    eval_dataset=dataset['test'],
+    tokenizer=tokenizer
+)
+training_info = trainer.train()
+
+evalution_info = trainer.evluate()
+info_dic = {'training': training_info, 'evalute': evalution_info}
+_dump_json_metric(model_name=model_id, info_dict=info_dic)
     
+
+# TODO: could make this to a shell, then call each model id to auto this.
     
-if __name__ == '__main__':
-    _training()
