@@ -18,27 +18,45 @@ from datasets import Dataset, load_from_disk
 import torch
 import shutil
 import os
-
+import argparse
+import sys
 from transformers import TrainingArguments
 from transformers import Trainer
 from transformers import AutoModelForQuestionAnswering, AutoTokenizer
 from transformers import Trainer, TrainingArguments
 
-model_id ="distilbert-base-cased-distilled-squad"
+
+qa_model_dict = {
+    'dist_bert':"distilbert-base-cased-distilled-squad",
+    'roberta': "deepset/roberta-base-squad2",
+    'bert': "deepset/bert-base-cased-squad2",
+    'bart': "valhalla/bart-large-finetuned-squadv1"
+}
+
+is_cuda = torch.cuda.is_available()
+
+device = torch.device('cuda') if is_cuda else torch.device('cpu')
+
+global model, tokenizer
 max_length = 384
 stride = 128
-
-tokenizer = AutoTokenizer.from_pretrained(model_id)
-model = AutoModelForQuestionAnswering.from_pretrained(model_id)
-
-# put model to GPU
-device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-
-model.to(device)
-
-
-# get current folder path
 cur_path = os.path.abspath(os.curdir)
+
+
+def get_model_tokenizer(model_id):
+    model_id = qa_model_dict.get('qa_model_dict')
+    if not model_id:
+        print("Couldn't get the model that current support: {}".format(model_id))
+        return 
+    
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    model = AutoModelForQuestionAnswering.from_pretrained(model_id)
+
+    # put model to GPU
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+
+    model.to(device)
+    return model, tokenizer
 
 
 def load_json(file_name):
@@ -229,7 +247,7 @@ def get_peft_model_lora_based(model, config=None):
     return model_new
 
 
-def get_model_prediction(question, context, model, tokenizer, is_model_in_gpu=True):
+def get_model_prediction(question, context, model, tokenizer):
     inputs = tokenizer(
         question,
         context,
@@ -239,6 +257,8 @@ def get_model_prediction(question, context, model, tokenizer, is_model_in_gpu=Tr
         padding="max_length",
         return_tensors='pt'
     )
+    
+    is_model_in_gpu = next(model.parameters()).is_cuda
     
     if is_model_in_gpu:
         inputs.to(device)
@@ -256,8 +276,30 @@ def get_model_prediction(question, context, model, tokenizer, is_model_in_gpu=Tr
 
 
 if __name__ == '__main__':
+    # to make the code to be called for shell, just add argparser, then will call different logic
+    # get the predefined model list that support QA question.
     # before training, we should empty the cuda cache
-    torch.cuda.empty_cache()
+    """qa_model_dict = {
+        'dist_bert':"distilbert-base-cased-distilled-squad",
+        'roberta': "deepset/roberta-base-squad2",
+        'bert': "deepset/bert-base-cased-squad2",
+        'bart': "valhalla/bart-large-finetuned-squadv1"
+        }"""    
+    parser = argparse.ArgumentParser()
+    
+    parser.add_argument('model_id', type=str, help='which model to use? Support list: [dist_bert, bert, bart, roberta]')
+    args = parser.parse_args()
+    
+    model_id = args.model_id
+    
+    
+    if is_cuda:
+        torch.cuda.empty_cache()
+        
+    model, tokenizer = get_model_tokenizer(model_id=model_id)
+    if not model:
+        print("Couldn't get the model to train, please check the model type!")
+        sys.exit(-1)
     peft_training = False
 
     if peft_training:
