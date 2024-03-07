@@ -4,7 +4,7 @@
 
 ### Diagram:
 
-![Analisis Diagrame](./legal_contract_analysis.png)
+![Analisis Diagram](./legal_contract_analysis.png)
 
 ### Description:
 

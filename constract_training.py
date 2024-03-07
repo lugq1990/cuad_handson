@@ -16,6 +16,7 @@ import json
 import pandas as pd
 from datasets import Dataset, load_from_disk
 import torch
+import shutil
 import os
 
 from transformers import TrainingArguments
@@ -37,7 +38,7 @@ model.to(device)
 
 
 # get current folder path
-cur_path = os.path.abspath(__file__)
+cur_path = os.path.abspath(os.curdir)
 
 
 def load_json(file_name):
@@ -136,7 +137,9 @@ def preprocess_training_examples(examples):
     return inputs
 
 
-def get_dataset(json_path, data_path='tmp_data'):
+def get_dataset(json_path, data_path='tmp_data', clean=False):
+    if clean:
+        shutil.rmtree(data_path)
     if os.path.exists(data_path):
         print("Start to load dataset from disk!")
         dataset = load_from_disk(data_path)
@@ -146,8 +149,8 @@ def get_dataset(json_path, data_path='tmp_data'):
         dataset  = _get_dataset(real_data)
         dataset = dataset.map(preprocess_training_examples, batched=True, remove_columns=dataset.column_names)
          # split to train and test dataset
-        split_ds = dataset.train_test_split(test_size=.1)
-        split_ds.save_to_disk(data_path)
+        dataset = dataset.train_test_split(test_size=.1)
+        dataset.save_to_disk(data_path)
     return dataset
 
 
@@ -198,6 +201,7 @@ def train_model(model, tokenizer, dataset,  output_dir=None):
         per_device_train_batch_size=64,
         fp16=True,
         push_to_hub=False,
+        logging_steps=100,
     )
 
     trainer = Trainer(
@@ -225,20 +229,19 @@ def get_peft_model_lora_based(model, config=None):
     return model_new
 
 
-def get_model_prediction(question, context, model, tokenizer):
+def get_model_prediction(question, context, model, tokenizer, is_model_in_gpu=True):
     inputs = tokenizer(
         question,
         context,
         max_length=max_length,
         truncation="only_second",
         stride=stride,
-        return_overflowing_tokens=True,
-        return_offsets_mapping=True,
         padding="max_length",
         return_tensors='pt'
     )
     
-    inputs = inputs.pop('offset_mapping')
+    if is_model_in_gpu:
+        inputs.to(device)
     
     with torch.no_grad():
         out = model(**inputs)
@@ -253,15 +256,17 @@ def get_model_prediction(question, context, model, tokenizer):
 
 
 if __name__ == '__main__':
+    # before training, we should empty the cuda cache
+    torch.cuda.empty_cache()
     peft_training = False
-    
+
     if peft_training:
         model = get_peft_model_lora_based(model)
         
-    dataset = get_dataset(json_path='sample.json')
+    dataset = get_dataset(json_path='sample.json', clean=True)
         
-    train_model(model, tokenizer, dataset=dataset, output_dir=model_id)
-    
+    train_model(model, tokenizer, dataset=dataset, output_dir=model_id + '_no_peft')
+
     # make one sample 
     question = "How many programming languages does BLOOM support?"
     context = "BLOOM has 176 billion parameters and can generate text in 46 languages natural languages and 13 programming languages."
@@ -269,3 +274,8 @@ if __name__ == '__main__':
     answer_str = get_model_prediction(question, context=context, model=model, tokenizer=tokenizer)
     # Tested is right.
     print("{}\n Get result: {}".format(question, answer_str))
+    
+    # TODO: there is one thing should be fixed, when to call the model always get the first token string [cls]?
+    # is that means for the tokenizer will do the truncation that sometimes for long text that after truncation
+    # won't get the real prediction?
+    # could be tested.
