@@ -1,3 +1,17 @@
+"""This is used to train the Question answering model based on new provided data.
+
+Support logic:
+- Load data file
+- Do prepprocessing to get dataset
+- Split to train and validation data
+- Fine-tuning: 1. full parameters 2. peft training
+    - Load pretrained model and tokenizer that supports for the QA task
+    - FEPT model with LORA based model 
+- Save pretrained model checkpoint, and evalute it, dump metrics to disk for comparation
+- Get prediction for QA pairs
+
+-> Use the predicted answer to construct the NEXT LLM model to analysis the risk for clause.
+"""
 import json
 import pandas as pd
 from datasets import Dataset, load_from_disk
@@ -161,43 +175,97 @@ def _dump_json_metric(model_name, info_dict, metric_path='metrics', ):
     # and sort the the metrics, then to get the best trained model, use this model to do prediction.
     metric_path = os.path.join(cur_path, metric_path)
     if not os.path.exists(metric_path):
-        os.mkdirs(metric_path, exists=True)
-    model_path = os.path.join(metric_path, model_name)
+        os.makedirs(metric_path, exist_ok=True)
+    model_path = os.path.join(metric_path, model_name + '.json')
     with open(model_path, 'w') as f:
         print("Start to dump json to metric path: {}".format(model_path))
         f.write(json.dumps(info_dict))
         
 
 
-dataset = get_dataset(json_path='sample.json')
 
-# batch_size 64 is tested will cause 10GB GPU memory
-args = TrainingArguments(
-    model_id,
-    evaluation_strategy="epoch",
-    save_strategy="epoch",
-    learning_rate=2e-5,
-    num_train_epochs=1,
-    weight_decay=0.01,
-    per_device_train_batch_size=64,
-    fp16=True,
-    push_to_hub=False,
-)
+def train_model(model, tokenizer, dataset,  output_dir=None):
+    if not output_dir:
+        output_dir = 'model_output'
+    # batch_size 64 is tested will cause 10GB GPU memory
+    args = TrainingArguments(
+        output_dir=output_dir,
+        evaluation_strategy="epoch",
+        save_strategy="epoch",
+        learning_rate=2e-5,
+        num_train_epochs=1,
+        weight_decay=0.01,
+        per_device_train_batch_size=64,
+        fp16=True,
+        push_to_hub=False,
+    )
 
+    trainer = Trainer(
+        model=model,
+        args=args,
+        train_dataset=dataset['train'],
+        eval_dataset=dataset['test'],
+        tokenizer=tokenizer
+    )
+    training_info = trainer.train()
 
-trainer = Trainer(
-    model=model,
-    args=args,
-    train_dataset=dataset['train'],
-    eval_dataset=dataset['test'],
-    tokenizer=tokenizer
-)
-training_info = trainer.train()
-
-evalution_info = trainer.evluate()
-info_dic = {'training': training_info, 'evalute': evalution_info}
-_dump_json_metric(model_name=model_id, info_dict=info_dic)
+    evalution_info = trainer.evaluate()
+    info_dic = {'training': training_info, 'evalute': evalution_info}
+    _dump_json_metric(model_name=model_id, info_dict=info_dic)
     
+     
+def get_peft_model_lora_based(model, config=None):
+    if not config:
+        from peft import get_peft_model, LoraConfig, TaskType
+        
+        config = LoraConfig(task_type=TaskType.QUESTION_ANS, inference_mode=False, r=8, lora_alpha=32, lora_dropout=.1, target_modules="all-linear")
+    model_new = get_peft_model(model, config)
+    print("Get new trainable model parameters: ")
+    model_new.print_trainable_parameters()
+    return model_new
 
-# TODO: could make this to a shell, then call each model id to auto this.
+
+def get_model_prediction(question, context, model, tokenizer):
+    inputs = tokenizer(
+        question,
+        context,
+        max_length=max_length,
+        truncation="only_second",
+        stride=stride,
+        return_overflowing_tokens=True,
+        return_offsets_mapping=True,
+        padding="max_length",
+        return_tensors='pt'
+    )
     
+    inputs = inputs.pop('offset_mapping')
+    
+    with torch.no_grad():
+        out = model(**inputs)
+        
+    answer_start_index = out.start_logits.argmax()
+    answer_end_index = out.end_logits.argmax()
+    
+    predict_answer_tokens = inputs.input_ids[0, answer_start_index : answer_end_index + 1]
+    predict_str = tokenizer.decode(predict_answer_tokens)
+    return predict_str
+
+
+
+if __name__ == '__main__':
+    peft_training = False
+    
+    if peft_training:
+        model = get_peft_model_lora_based(model)
+        
+    dataset = get_dataset(json_path='sample.json')
+        
+    train_model(model, tokenizer, dataset=dataset, output_dir=model_id)
+    
+    # make one sample 
+    question = "How many programming languages does BLOOM support?"
+    context = "BLOOM has 176 billion parameters and can generate text in 46 languages natural languages and 13 programming languages."
+
+    answer_str = get_model_prediction(question, context=context, model=model, tokenizer=tokenizer)
+    # Tested is right.
+    print("{}\n Get result: {}".format(question, answer_str))
