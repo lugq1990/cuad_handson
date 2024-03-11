@@ -2,3 +2,8 @@ transformers[torch]
 datasets
 evaluate
 peft
+gpt4all
+PyPDF2
+langchain
+spacy
+gradio

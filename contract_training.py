@@ -44,18 +44,19 @@ cur_path = os.path.abspath(os.curdir)
 
 
 def get_model_tokenizer(model_id):
-    model_id = qa_model_dict.get('qa_model_dict')
+    model_id = qa_model_dict.get(model_id)
     if not model_id:
         print("Couldn't get the model that current support: {}".format(model_id))
         return 
     
+    print("Start to Download pre-trained model")
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     model = AutoModelForQuestionAnswering.from_pretrained(model_id)
 
-    # put model to GPU
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-
-    model.to(device)
+    try:
+        model.to(device)
+    except Exception as e:
+        print("When to put model to GPU with error: {}".format(e))
     return model, tokenizer
 
 
@@ -63,6 +64,7 @@ def load_json(file_name):
     with open(file_name, 'r') as f:
         data = json.loads(f.read())
     return data
+
 
 # let's create a func to make the real data with 
 def get_trained_data(training_data_path='sample.json'):
@@ -155,9 +157,7 @@ def preprocess_training_examples(examples):
     return inputs
 
 
-def get_dataset(json_path, data_path='tmp_data', clean=False):
-    if clean:
-        shutil.rmtree(data_path)
+def get_dataset(json_path, data_path='tmp_data'):
     if os.path.exists(data_path):
         print("Start to load dataset from disk!")
         dataset = load_from_disk(data_path)
@@ -201,14 +201,13 @@ def _dump_json_metric(model_name, info_dict, metric_path='metrics', ):
     with open(model_path, 'w') as f:
         print("Start to dump json to metric path: {}".format(model_path))
         f.write(json.dumps(info_dict))
-        
 
 
-
-def train_model(model, tokenizer, dataset,  output_dir=None):
+def train_model(model, tokenizer, dataset,  output_dir=None, training_config={}):
     if not output_dir:
         output_dir = 'model_output'
     # batch_size 64 is tested will cause 10GB GPU memory
+    batch_size = training_config.get('batch_size', 12)
     args = TrainingArguments(
         output_dir=output_dir,
         evaluation_strategy="epoch",
@@ -216,7 +215,7 @@ def train_model(model, tokenizer, dataset,  output_dir=None):
         learning_rate=2e-5,
         num_train_epochs=1,
         weight_decay=0.01,
-        per_device_train_batch_size=64,
+        per_device_train_batch_size=batch_size,
         fp16=True,
         push_to_hub=False,
         logging_steps=100,
@@ -247,6 +246,16 @@ def get_peft_model_lora_based(model, config=None):
     return model_new
 
 
+def _load_model_tokenizer(model_path):
+    if not os.path.exists(model_path):
+        print("No model path find: {}".format(model_path))
+        return 
+    model = AutoModelForQuestionAnswering.from_pretrained(model_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    return model, tokenizer
+
+
+
 def get_model_prediction(question, context, model, tokenizer):
     inputs = tokenizer(
         question,
@@ -275,49 +284,69 @@ def get_model_prediction(question, context, model, tokenizer):
 
 
 
-if __name__ == '__main__':
+# if __name__ == '__main__':
     # to make the code to be called for shell, just add argparser, then will call different logic
     # get the predefined model list that support QA question.
     # before training, we should empty the cuda cache
-    """qa_model_dict = {
-        'dist_bert':"distilbert-base-cased-distilled-squad",
-        'roberta': "deepset/roberta-base-squad2",
-        'bert': "deepset/bert-base-cased-squad2",
-        'bart': "valhalla/bart-large-finetuned-squadv1"
-        }"""    
-    parser = argparse.ArgumentParser()
-    
-    parser.add_argument('model_id', type=str, help='which model to use? Support list: [dist_bert, bert, bart, roberta]')
-    args = parser.parse_args()
-    
-    model_id = args.model_id
-    
-    
-    if is_cuda:
+"""qa_model_dict = {
+    'dist_bert':"distilbert-base-cased-distilled-squad",
+    'roberta': "deepset/roberta-base-squad2",
+    'bert': "deepset/bert-base-cased-squad2",
+    'bart': "valhalla/bart-large-finetuned-squadv1"
+    }"""    
+# parser = argparse.ArgumentParser()
+
+# parser.add_argument('--model_id', '-md', type=str, help='which model to use? Support list: [dist_bert, bert, bart, roberta]')
+# parser.add_argument('--batch_size', type=int, help='batch_size to use')
+# args = parser.parse_args()
+
+# model_id = args.model_id
+
+model_id = 'dist_bert'
+batch_size = 12
+
+training_config = {
+    'batch_size': batch_size
+}
+
+if is_cuda:
+    try:
         torch.cuda.empty_cache()
+    except:
+        print("To release CUDA memory with error.")
         
-    model, tokenizer = get_model_tokenizer(model_id=model_id)
-    if not model:
-        print("Couldn't get the model to train, please check the model type!")
-        sys.exit(-1)
-    peft_training = False
+model_id = qa_model_dict.get(model_id)
 
-    if peft_training:
-        model = get_peft_model_lora_based(model)
-        
-    dataset = get_dataset(json_path='sample.json', clean=True)
-        
-    train_model(model, tokenizer, dataset=dataset, output_dir=model_id + '_no_peft')
+print("Start to Download pre-trained model")
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+model = AutoModelForQuestionAnswering.from_pretrained(model_id)
 
-    # make one sample 
-    question = "How many programming languages does BLOOM support?"
-    context = "BLOOM has 176 billion parameters and can generate text in 46 languages natural languages and 13 programming languages."
+# put model to GPU
+device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
-    answer_str = get_model_prediction(question, context=context, model=model, tokenizer=tokenizer)
-    # Tested is right.
-    print("{}\n Get result: {}".format(question, answer_str))
+model.to(device)
+
+if not model:
+    print("Couldn't get the model to train, please check the model type!")
+    sys.exit(-1)
+peft_training = False
+
+if peft_training:
+    model = get_peft_model_lora_based(model)
     
-    # TODO: there is one thing should be fixed, when to call the model always get the first token string [cls]?
-    # is that means for the tokenizer will do the truncation that sometimes for long text that after truncation
-    # won't get the real prediction?
-    # could be tested.
+dataset = get_dataset(json_path='sample.json')
+    
+train_model(model, tokenizer, dataset=dataset, output_dir=model_id + '_no_peft', training_config=training_config)
+
+# make one sample 
+question = "How many programming languages does BLOOM support?"
+context = "BLOOM has 176 billion parameters and can generate text in 46 languages natural languages and 13 programming languages."
+
+answer_str = get_model_prediction(question, context=context, model=model, tokenizer=tokenizer)
+# Tested is right.
+print("{}\n Get result: {}".format(question, answer_str))
+
+# TODO: there is one thing should be fixed, when to call the model always get the first token string [cls]?
+# is that means for the tokenizer will do the truncation that sometimes for long text that after truncation
+# won't get the real prediction?
+# could be tested.
