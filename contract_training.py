@@ -18,6 +18,8 @@ from datasets import Dataset, load_from_disk
 import torch
 import shutil
 import os
+import numpy as np
+
 import argparse
 import sys
 from transformers import TrainingArguments
@@ -67,7 +69,7 @@ def load_json(file_name):
 
 
 # let's create a func to make the real data with 
-def get_trained_data(training_data_path='sample.json'):
+def _get_trained_data(training_data_path='sample.json'):
     train_data = load_json(training_data_path)
 
     real_train_ds = []
@@ -93,11 +95,26 @@ def get_trained_data(training_data_path='sample.json'):
     return real_train_ds
 
 
-def _get_dataset(real_train_ds):
-    df = pd.DataFrame(real_train_ds)
+def _get_test_data(data_path='test.json'):
+    test_data = load_json(data_path)
+    test_data_list = []
+    for i, d in enumerate(test_data['data']):
+        ps = d['paragraphs']
+        for p in ps:
+            context = p['context']
+            for qas in p['qas']:
+                qas['context'] = context
+                qas.pop('is_impossible', '')
+            test_data_list.append(qas)
+    return test_data_list
+
+
+
+def _get_dataset_from_json(json_data):
+    df = pd.DataFrame(json_data)
 
     dataset = Dataset.from_pandas(df)
-    print(len(dataset))
+    print('get dataest size: ', len(dataset))
     return dataset
 
 
@@ -157,14 +174,142 @@ def preprocess_training_examples(examples):
     return inputs
 
 
-def get_dataset(json_path, data_path='tmp_data'):
+def preprocess_validation_examples(examples):
+    if isinstance(examples, dict):
+        questions = examples["question"].strip()
+    else:
+        questions = [q.strip() for q in examples["question"]]
+    inputs = tokenizer(
+        questions,
+        examples["context"],
+        max_length=max_length,
+        truncation="only_second",
+        stride=stride,
+        return_overflowing_tokens=True,
+        return_offsets_mapping=True,
+        padding="max_length",
+    )
+
+    sample_map = inputs.pop("overflow_to_sample_mapping")
+    example_ids = []
+
+    for i in range(len(inputs["input_ids"])):
+        sample_idx = sample_map[i]
+        example_ids.append(examples["id"][sample_idx])
+
+        sequence_ids = inputs.sequence_ids(i)
+        offset = inputs["offset_mapping"][i]
+        inputs["offset_mapping"][i] = [
+            o if sequence_ids[k] == 1 else None for k, o in enumerate(offset)
+        ]
+
+    inputs["example_id"] = example_ids
+    return inputs
+
+
+def get_validation_dataset(validation_file_path=None, validation_json=None):
+    """get validation dataset based on the file or a json object
+
+    Args:
+        validation_file_path (_type_, optional): _description_. Defaults to None.
+        validation_json (JSON, optional): Must with `question`, `context`, `id`. Defaults to None.
+    """
+    if not validation_file_path:
+        # load from local file
+        validation_json = _get_test_data(data_path=validation_file_path)
+        vali_ds = _get_dataset_from_json(validation_json)
+    else:
+        if not isinstance(validation_json, list):
+            validation_json = [validation_json]
+        vali_ds = _get_dataset_from_json(validation_json)
+    return vali_ds
+
+
+def get_model_prediction(model, question, context, id, n_best = 20, max_answer_length=300):
+    example = {
+        'question': question, 
+        'context': context,
+        'id': id
+    }
+    inputs = preprocess_validation_examples(example)
+    
+    if 'offset_mapping' in inputs:
+        offsets = inputs.pop('offset_mapping')
+    
+    # batch = {k: inputs[k].to(device) for k in inputs}
+    
+    with torch.no_grad():
+        outputs = model(**inputs)
+        
+    start_logits = outputs.start_logits.cpu().numpy()
+    end_logits = outputs.end_logits.cpu().numpy()
+    
+    predicted_answers = []
+
+    example_id = example["id"]
+    context = example["context"]
+    answers = []
+
+    # TODO: confirm whether this is only the 0 index?
+    start_logit = start_logits[0]
+    end_logit = end_logits[0]
+
+    start_indexes = np.argsort(start_logit)[-1 : -n_best - 1 : -1].tolist()
+    end_indexes = np.argsort(end_logit)[-1 : -n_best - 1 : -1].tolist()
+    for start_index in start_indexes:
+        for end_index in end_indexes:
+            # Skip answers that are not fully in the context
+            if offsets[start_index] is None or offsets[end_index] is None:
+                continue
+            # Skip answers with a length that is either < 0 or > max_answer_length.
+            if (
+                end_index < start_index
+                or end_index - start_index + 1 > max_answer_length
+            ):
+                continue
+
+            answers.append(
+                {
+                    "text": context[offsets[start_index][0] : offsets[end_index][1]],
+                    "logit_score": start_logit[start_index] + end_logit[end_index],
+                }
+            )
+
+    best_answer = max(answers, key=lambda x: x["logit_score"])
+    predicted_answers.append({"id": example_id, "prediction_text": best_answer["text"]})
+    
+    return predicted_answers
+        
+    
+
+
+def validate_model(model, test_data_path='test.json'):
+    vali_ds = _get_test_data(test_data_path)
+    validation_dataset = vali_ds.map(
+        preprocess_validation_examples,
+        batched=True,
+        remove_columns=vali_ds.column_names,
+    )
+
+    eval_set_for_model = validation_dataset.remove_columns(["example_id", "offset_mapping"])
+    eval_set_for_model.set_format("torch")
+
+    batch = {k: eval_set_for_model[k].to(device) for k in eval_set_for_model.column_names}
+
+    with torch.no_grad():
+        outputs = model(**batch)
+        
+    
+        
+
+def get_train_dataset(json_path, data_path='tmp_data'):
     if os.path.exists(data_path):
         print("Start to load dataset from disk!")
         dataset = load_from_disk(data_path)
     else:
         print("Start to build dataset based on JSON file")
-        real_data = get_trained_data(json_path)
-        dataset  = _get_dataset(real_data)
+        train_json = _get_trained_data(json_path)
+        dataset  = _get_dataset_from_json(train_json)
         dataset = dataset.map(preprocess_training_examples, batched=True, remove_columns=dataset.column_names)
          # split to train and test dataset
         dataset = dataset.train_test_split(test_size=.1)
@@ -232,6 +377,9 @@ def train_model(model, tokenizer, dataset,  output_dir=None, training_config={})
 
     evalution_info = trainer.evaluate()
     info_dic = {'training': training_info, 'evalute': evalution_info}
+    
+    # as some model_id will contain / to separate
+    model_path = model_id.split('/')[-1] if '/' in model_id else model_id
     _dump_json_metric(model_name=model_id, info_dict=info_dic)
     
      
@@ -324,7 +472,10 @@ model = AutoModelForQuestionAnswering.from_pretrained(model_id)
 # put model to GPU
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
-model.to(device)
+try:
+    model.to(device)
+except Exception as e:
+    print("When to load model to GPU with error: {}".format(e))
 
 if not model:
     print("Couldn't get the model to train, please check the model type!")
@@ -334,7 +485,7 @@ peft_training = False
 if peft_training:
     model = get_peft_model_lora_based(model)
     
-dataset = get_dataset(json_path='sample.json')
+dataset = get_train_dataset(json_path='sample.json')
     
 train_model(model, tokenizer, dataset=dataset, output_dir=model_id + '_no_peft', training_config=training_config)
 
