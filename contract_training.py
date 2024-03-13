@@ -364,6 +364,7 @@ def train_model(model, tokenizer, dataset,  output_dir=None, training_config={})
         fp16=True,
         push_to_hub=False,
         logging_steps=100,
+        report_to='none'
     )
 
     trainer = Trainer(
