@@ -7,3 +7,4 @@ PyPDF2
 langchain
 spacy
 gradio
+sentence-transformers

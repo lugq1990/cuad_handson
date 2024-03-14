@@ -50,4 +50,6 @@ TODO: Provide a full summary of current work:
 4. user benefit with user story
 5. put the model to local server: gpt4all, llama2, chatglm
 6. how to evaluate our result? and how to improve it if put the model to real prod?
-7. DO it tomorrow!
+7. what problems have faced, and how to solve it?
+8. DO it tomorrow!
+
