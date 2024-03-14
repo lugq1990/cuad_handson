@@ -11,7 +11,9 @@ from langchain.embeddings import HuggingFaceEmbeddings
 import torch
 # add this to avoid import error.
 sys.path.append(r'D:\work\code_related\my_codes\llm_implement')
-from chat_llm.preprossing import VectorStore
+# from chat_llm.preprossing import VectorStore
+
+os.environ['hugging_access_token'] = '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'
 
 
 def init_env():
@@ -93,7 +95,7 @@ class LLMModel:
 
 
 class ChatModel:
-    def __init__(self, use_gpt4all=True, model_name='gpt2') -> None:
+    def __init__(self, use_gpt4all=False, model_name='llama2') -> None:
         self.use_gpt4all = use_gpt4all
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         if self.device == 'cpu':
@@ -109,7 +111,7 @@ class ChatModel:
             self.qa_chain = RetrievalQA.from_chain_type(llm=self.llm, chain_type="stuff", retriever=self.vectore_store.as_retriever(), return_source_documents=True)
         else:
             self._get_model_tokenizer(model_name=model_name)
-        self.vectore_store = VectorStore()
+        # self.vectore_store = VectorStore()
         
 
     def _get_model_tokenizer(self, model_name):
@@ -145,14 +147,21 @@ class ChatModel:
         pred_words = self.tokenizer.decode(pred, batched=True)
         pred_words
         return pred_words
+    
+    def model_pred(self, query):
+        start_time = time.time()
+        prompt = query
+        model_output = self._llm_model(prompt)
+        print("AI system: ", model_output)
         
     def chat(self):
         while True:
             query = input("\nQuery:")
+            prompt = query
             start_time = time.time()
             # load query similary content and put them into prompt
-            prompt = self._construct_prompt(query=query)
-            print("Get prompt:", prompt)
+            # prompt = self._construct_prompt(query=query)
+            # print("Get prompt:", prompt)
             if self.use_gpt4all:
                 res = self.qa_chain(prompt)
                 model_output = res['result']
