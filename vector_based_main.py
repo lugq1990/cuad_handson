@@ -10,8 +10,8 @@ import json
 import sys
 import time
 import torch
-
-
+import pandas as pd
+import collections
 from langchain_community.vectorstores.chroma import Chroma
 from langchain_text_splitters import CharacterTextSplitter
 from langchain_community.embeddings.huggingface import HuggingFaceEmbeddings
@@ -37,6 +37,9 @@ SYSTEM_PROMPT = textwrap.dedent(SYSTEM_PROMPT).strip()
 
 auth_token = "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"
 model_name = "meta-llama/Llama-2-7b-chat-hf"
+
+# change model_name to new one that to avoid permission error:
+model_name = "daryl149/llama-2-7b-chat-hf"
 
 
 os.environ['hugging_access_token'] = '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'
@@ -132,7 +135,7 @@ class VectorDB:
 def _load_contract(file_name, file_path=None):
     if not file_path:
         file_path = 'contracts'
-    with open(os.path.join(file_path, file_name), 'r') as f:
+    with open(os.path.join(file_path, file_name), 'r', encoding='utf-8') as f:
         return f.read()
 
 
@@ -188,17 +191,6 @@ class LLama2:
 
 
 
-
-
-# if __name__ == '__main__':
-"read the contrat and init the vectordb, get user query, and get similar paragraph, use this to do prompt constraction."
-
-try:
-    torch.cuda.empty_cache()
-except:
-    print("To release CUDA memory with error.")
-
-
 def init_db(contract_file):
     text = _load_contract(contract_file)
     para_list = clause_extract(text=text)
@@ -208,17 +200,13 @@ def init_db(contract_file):
     db._init_db(text_list=para_list)
     return db
 
-contract_path = 'contracts'
-contract_file = os.listdir(contract_path)[0]
-clause_sim_dict = _load_json('./similar_clause_dict.json')
 
-# next step is to build LLM instance that could handle requst from user.
-model = LLama2(model_name=model_name, auth_token=auth_token)
-
-
-def process_one_contract(model, contract_file, clause_name):
-    db = init_db(contract_file=contract_file)
-
+def process_one_clause(model, db, clause_name):
+    """Should also provide the extracted clause context for the later use case that 
+    we could get some insights that maybe not the model get error, but just the content 
+    provided is not correct!
+    """
+    clause_info = {}
     # at least we should ensure that this key words should be in the text.
     query = clause_name  
     if query not in clause_sim_dict:
@@ -236,35 +224,91 @@ def process_one_contract(model, contract_file, clause_name):
             # this prompt could be sent to the LLM
             prompt = prompt_template.format(related_para, query)
             resp = model.generate(prompt=prompt, history=[])
+            
+            # remove no used <s> from the response
+            resp = resp.replace('<s>', '').strip()
             print(resp)
         else:
             resp = "Couldn't get related paragraph from the contract for clause: {}".format(query)
             print(resp)
-        return {clause_name: resp}
-          
-        
-# Next step is to use this model to get model prediction for full list of contracts, for each clause will get a output
-# then just dump each of them into disk for user next step evaluation.
+        # add info to res.
+        clause_info['clause_name'] =  clause_name
+        clause_info['extracted_clause'] =  related_para
+        clause_info['model_response'] =  resp
+        return clause_info
 
-import collections
 
-model_output_dict = collections.defaultdict(list)
-
-contract_list = os.listdir(contract_path)
-
-clause_list = list(clause_sim_dict.keys())
-
-for contract_file in contract_list:
-    print("Start to process file: {}".format(contract_file))
-    print('-'* 100)
-    model_output_dict[contract_file] = []
+def process_one_contract(model, contract_file, clause_list):
+    """Process one contract at one time."""
+    db = init_db(contract_file=contract_file)
+    clause_list_result = []
+    
     for clause in clause_list:
-        print("*" * 50)
-        print("Start to process clause: {}".format(clause))
-        res = process_one_contract(model=model, contract_file=contract_file, clause_name=clause)
-        model_output_dict[contract_file].append(res)
+        clause_res = process_one_clause(model, db=db, clause_name=clause)
+        clause_list_result.append(clause_res)
         
-# dump result to disk
-print("Start to dump the model final output to disk: ")
-with open("model_res.json", 'w') as f:
-    f.write(json.dumps(model_output_dict))
+    return clause_list_result
+    
+          
+
+def _dump_model_output(model_output_dict, raw_json_data_file_name='model_output_res.json', output_excel_file_name='model_output_with_rating.xlsx'):
+    """Dump model output to disk for later use.
+    
+    For user validation excel, each sheet is the contract name, provide 2 cols: 
+        extract_clause_correct: is extracted clause correct?
+        is_model_analysis_useful: is model output is useful for user?
+
+    Args:
+        model_output_dict (json): a dict key with key name is contract name, value is a list of output res
+        raw_json_data_file_name (str, optional): _description_. Defaults to 'model_output_res.json'.
+        output_excel_file_name (str, optional): _description_. Defaults to 'model_output_with_rating.xlsx'.
+    """
+    if raw_json_data_file_name:
+        print("Start to dump the model final output to disk: ")
+        with open(raw_json_data_file_name, 'w') as f:
+            f.write(json.dumps(model_output_dict))
+    if output_excel_file_name:
+        # dump json to excel for user
+        with pd.ExcelWriter('output.xlsx') as writer:
+            for k, v in model_output_dict.items():
+                df = pd.DataFrame(v)
+                df['extract_clause_correct'] = ''
+                df['is_model_analysis_useful'] = ''
+                df.to_excel(writer, k, index=False)
+
+
+
+if __name__ == '__main__':
+    "read the contrat and init the vectordb, get user query, and get similar paragraph, use this to do prompt constraction."  
+    start_time = time.time()  
+    try:
+        # first time to release gpu 
+        torch.cuda.empty_cache()
+    except:
+        print("To release CUDA memory with error.")
+
+    contract_path = 'contracts'
+    contract_list = os.listdir(contract_path)
+    
+    # get the predefined clause list.
+    clause_sim_dict = _load_json('./similar_clause_dict.json')
+    clause_list = list(clause_sim_dict.keys())
+
+    # next step is to build LLM instance that could handle requst from user.
+    model = LLama2(model_name=model_name, auth_token=auth_token)
+          
+    # Next step is to use this model to get model prediction for full list of contracts, for each clause will get a output
+    # then just dump each of them into disk for user next step evaluation.
+    model_output_dict = collections.defaultdict(list)
+
+    for contract_file in contract_list:
+        print("Start to process file: {}".format(contract_file))
+        print('-'* 100)
+        model_output_dict[contract_file] = []
+        clause_list_result = process_one_contract(contract_file=contract_file, clause_list=clause_list)
+
+    _dump_model_output(model_output_dict=model_output_dict)
+    
+    end_time = time.time()
+    print("Full process takes: {} mins to process: {} contracts".format((end_time - start_time)/ 60), len(contract_list))
+    
