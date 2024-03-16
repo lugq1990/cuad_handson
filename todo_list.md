@@ -37,3 +37,19 @@ A diagram for data flow and user interaction.
 12. Asyncio process for one contract that contain many clauses, after the step finished, send a mail to user  /// or user could select one clause that to check, then will do the full step.
 13. A list of clauses supported based on the csv file
 14. Should add a metric for each model deployment, like inference time, latency, and full pipeline time for one sample or batch.
+
+## Summary of current work:
+- Already create the QA model and fine-tuned the model, training and validation loss is decreased, but when to do real prediction, the model do really not good
+- TODO: get the exact match score for the dataset!
+- Create a new way to do analysis, like VectorDB just as before, but one thing should notice is that even with this step, there isn't a metric to evaluate the LLM model performance, as this isn't a labeled problem...
+
+TODO: Provide a full summary of current work:
+1. what have been done, what's the result
+2. the reason to do 
+3. data flow and how to make each one workabel
+4. user benefit with user story
+5. put the model to local server: gpt4all, llama2, chatglm
+6. how to evaluate our result? and how to improve it if put the model to real prod?
+7. what problems have faced, and how to solve it?
+8. DO it tomorrow!
+

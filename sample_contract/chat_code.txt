@@ -1,0 +1,15 @@
+Furniture Rentals Contract
+
+This agreement is made and entered into this day of____, 20__, between [Company A] (“Company A”) and [Company B] (“Company B”).
+
+This Furniture Rentals Contract (the “Agreement”) sets forth the terms and conditions under which Company A will provide furniture rental services to Company B.
+
+1. Furniture Rentals. Company A agrees to provide furniture rental services to Company B as specified by Company B in a separate written order form and/or invoice issued by Company A.
+
+2. Terms of Payment. Company B agrees to pay for the furniture rental services provided in accordance with the payment terms set forth in the separate order form and/or invoice.
+
+3. Term. This Agreement shall begin on the Effective Date and shall continue for a period of one year, unless terminated earlier in accordance with Section 4.
+
+4. Termination. This Agreement may be terminated by either party upon thirty (30) days written notice to the other party.
+
+5. Governing Law. This Agreement shall be governed by the laws of the [State], without giving effect to any principles of conflicts of law

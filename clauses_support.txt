@@ -1,0 +1,41 @@
+Document Name
+Parties
+Agreement Date
+Effective Date
+Expiration Date
+Renewal Term
+Notice Period to Terminate Renewal
+Governing Law
+Most Favored Nation
+Non-Compete
+Exclusivity
+No-Solicit of Customers
+Competitive Restriction Exception
+No-Solicit of Employees
+Non-Disparagement
+Termination for Convenience
+Rofr/Rofo/Rofn
+Change of Control
+Anti-Assignment
+Revenue/Profit Sharing
+Price Restrictions
+Minimum Commitment
+Volume Restriction
+IP Ownership Assignment
+Joint IP Ownership
+License Grant
+Non-Transferable License
+Affiliate License-Licensor
+Affiliate License-Licensee
+Unlimited/All-You-Can-Eat-License
+Irrevocable or Perpetual License
+Source Code Escrow
+Post-Termination Services
+Audit Rights
+Uncapped Liability
+Cap on Liability
+Liquidated Damages
+Warranty Duration
+Insurance
+Covenant Not to Sue
+Third Party Beneficiary

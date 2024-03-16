@@ -1,3 +1,14 @@
-transformers[torch]
+transformers
 datasets
 evaluate
+peft
+gpt4all
+PyPDF2
+langchain
+spacy
+gradio
+chromadb
+sentence-transformers
+transformers[torch]
+bitsandbytes
+accelerate
