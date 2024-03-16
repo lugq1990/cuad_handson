@@ -1,0 +1,30 @@
+{
+  "citation": "",
+  "description": "",
+  "features": {
+    "input_ids": {
+      "feature": {
+        "dtype": "int32",
+        "_type": "Value"
+      },
+      "_type": "Sequence"
+    },
+    "attention_mask": {
+      "feature": {
+        "dtype": "int8",
+        "_type": "Value"
+      },
+      "_type": "Sequence"
+    },
+    "start_positions": {
+      "dtype": "int64",
+      "_type": "Value"
+    },
+    "end_positions": {
+      "dtype": "int64",
+      "_type": "Value"
+    }
+  },
+  "homepage": "",
+  "license": ""
+}
