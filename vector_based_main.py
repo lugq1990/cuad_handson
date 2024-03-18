@@ -57,6 +57,8 @@ model_dic = {
     }
 }
 
+already_processe_file_list_path = 'already_processe_file_list.txt'
+model_response_file_name = 'model_response.txt'
 
 prompt_template = """"Scenario: You are a legal professional working for a law firm that deals with various types of contracts. Your firm has recently developed an advanced content search engine that utilizes AI language model, LLM, to assist in analyzing and extracting relevant information from legal contracts. If the content haven't been provided, then you should use your know logic to try to answer the query.
 
@@ -65,6 +67,26 @@ Content: {}
 Query: what is the potential risk for {}
 """
 
+
+def _append_to_file(content, file_name):
+    if isinstance(content, dict):
+        content = json.dumps(content)
+    with open(file_name, 'a+', encoding='utf-8') as f:
+        f.write(content + '\n')
+        
+
+def _load_file_content(file_name):
+    """Get file content as a list
+
+    Args:
+        file_name (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+    with open(file_name, 'r') as f:
+        return [d.strip('\n', '') for d in f.readlines()]
+    
 
 class NLPProcessor:
     def __init__(self, model_name="en_core_web_sm"):
@@ -238,20 +260,27 @@ def process_one_clause(model, db, clause_name):
         return clause_info
 
 
-def process_one_contract(model, contract_file, clause_list):
+def process_one_contract(model, contract_file, clause_list, metadata_path):
     """Process one contract at one time."""
     db = init_db(contract_file=contract_file)
     clause_list_result = []
     
     for clause in clause_list:
+        clause_dict = {}
+        clause_dict['clause_name'] = clause
+        print("[Process Clause]: {}".format(clause))
         clause_res = process_one_clause(model, db=db, clause_name=clause)
         clause_list_result.append(clause_res)
+        clause_dict['model_response'] = clause_res
         
     return clause_list_result
     
           
 
-def _dump_model_output(model_output_dict, raw_json_data_file_name='model_output_res.json', output_excel_file_name='model_output_with_rating.xlsx'):
+def _dump_model_output(model_output_dict, 
+                       raw_json_data_file_name='model_output_res.json', 
+                       output_excel_file_name='model_output_with_rating.xlsx',
+                       finished=False):
     """Dump model output to disk for later use.
     
     For user validation excel, each sheet is the contract name, provide 2 cols: 
@@ -265,16 +294,18 @@ def _dump_model_output(model_output_dict, raw_json_data_file_name='model_output_
     """
     if raw_json_data_file_name:
         print("Start to dump the model final output to disk: ")
-        with open(raw_json_data_file_name, 'w') as f:
+        with open(raw_json_data_file_name, 'a') as f:
             f.write(json.dumps(model_output_dict))
-    if output_excel_file_name:
-        # dump json to excel for user
-        with pd.ExcelWriter('output.xlsx') as writer:
-            for k, v in model_output_dict.items():
-                df = pd.DataFrame(v)
-                df['extract_clause_correct'] = ''
-                df['is_model_analysis_useful'] = ''
-                df.to_excel(writer, k, index=False)
+    if finished:
+        # only after the model finished, then dump the result to excel
+        if output_excel_file_name:
+            # dump json to excel for user
+            with pd.ExcelWriter('output.xlsx') as writer:
+                for k, v in model_output_dict.items():
+                    df = pd.DataFrame(v)
+                    df['extract_clause_correct'] = ''
+                    df['is_model_analysis_useful'] = ''
+                    df.to_excel(writer, k, index=False)
 
 
 
@@ -287,6 +318,11 @@ if __name__ == '__main__':
     except:
         print("To release CUDA memory with error.")
 
+    # todo: how to ensure that we will process the data again from already precessed file?
+    metadata_path = 'metadata_info'
+    os.makedirs(metadata_path, exist_ok=True)
+    
+    # not just process the file all once, just one by one, and dump the metadata and result into disk.
     contract_path = 'contracts'
     contract_list = os.listdir(contract_path)
     
@@ -300,14 +336,23 @@ if __name__ == '__main__':
     # Next step is to use this model to get model prediction for full list of contracts, for each clause will get a output
     # then just dump each of them into disk for user next step evaluation.
     model_output_dict = collections.defaultdict(list)
+    finished = False
+    
+    # only process that file haven't been processed
+    already_processed_file_list = _load_file_content(already_processe_file_list_path)
+    contract_list = list(set(contract_list) - set(already_processed_file_list))
 
-    for contract_file in contract_list:
+    for i, contract_file in enumerate(contract_list):
         print("Start to process file: {}".format(contract_file))
         print('-'* 100)
         model_output_dict[contract_file] = []
-        clause_list_result = process_one_contract(contract_file=contract_file, clause_list=clause_list)
-
-    _dump_model_output(model_output_dict=model_output_dict)
+        clause_list_result = process_one_contract(model=model, contract_file=contract_file, clause_list=clause_list, metadata_path=metadata_path)
+        
+        if i == len(contract_list) - 1:
+            finished = True
+        print("Start to dump the contract result: {}".format(contract_file))
+        _dump_model_output(model_output_dict=model_output_dict, finished=finished)
+        _append_to_file(contract_file, file_name=already_processe_file_list_path)
     
     end_time = time.time()
     print("Full process takes: {} mins to process: {} contracts".format((end_time - start_time)/ 60), len(contract_list))
