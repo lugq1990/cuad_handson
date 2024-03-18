@@ -84,6 +84,8 @@ def _load_file_content(file_name):
     Returns:
         _type_: _description_
     """
+    if not os.path.exists(file_name):
+        return []
     with open(file_name, 'r') as f:
         return [d.strip('\n', '') for d in f.readlines()]
     
