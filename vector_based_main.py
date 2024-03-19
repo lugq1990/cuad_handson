@@ -345,6 +345,7 @@ if __name__ == '__main__':
     contract_list = list(set(contract_list) - set(already_processed_file_list))
 
     for i, contract_file in enumerate(contract_list):
+        one_file_start_time = time.time()
         print("Start to process file: {}".format(contract_file))
         print('-'* 100)
         model_output_dict[contract_file] = []
@@ -355,6 +356,10 @@ if __name__ == '__main__':
         print("Start to dump the contract result: {}".format(contract_file))
         _dump_model_output(model_output_dict=model_output_dict, finished=finished)
         _append_to_file(contract_file, file_name=already_processe_file_list_path)
+        one_file_end_time = time.time()
+        
+        # one file with 41 contract will takes 23 mins to finish
+        print("To process one file take: {} mins".format((one_file_end_time - one_file_start_time) / 60))
     
     end_time = time.time()
     print("Full process takes: {} mins to process: {} contracts".format((end_time - start_time)/ 60), len(contract_list))
