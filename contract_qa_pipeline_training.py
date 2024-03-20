@@ -389,6 +389,9 @@ def get_peft_model_lora_based(model, config=None):
         from peft import get_peft_model, LoraConfig, TaskType
         
         config = LoraConfig(task_type=TaskType.QUESTION_ANS, inference_mode=False, r=8, lora_alpha=32, lora_dropout=.1, target_modules="all-linear")
+    # before to get lora model,fix the full model parameters
+    for p in model.parameters():
+        p.reguires_grad = False
     model_new = get_peft_model(model, config)
     print("Get new trainable model parameters: ")
     model_new.print_trainable_parameters()
@@ -433,72 +436,69 @@ def get_model_prediction(question, context, model, tokenizer):
 
 
 
-# if __name__ == '__main__':
+if __name__ == '__main__':
     # to make the code to be called for shell, just add argparser, then will call different logic
     # get the predefined model list that support QA question.
     # before training, we should empty the cuda cache
-"""qa_model_dict = {
-    'dist_bert':"distilbert-base-cased-distilled-squad",
-    'roberta': "deepset/roberta-base-squad2",
-    'bert': "deepset/bert-base-cased-squad2",
-    'bart': "valhalla/bart-large-finetuned-squadv1"
-    }"""    
-# parser = argparse.ArgumentParser()
+    """qa_model_dict = {
+        'dist_bert':"distilbert-base-cased-distilled-squad",
+        'roberta': "deepset/roberta-base-squad2",
+        'bert': "deepset/bert-base-cased-squad2",
+        'bart': "valhalla/bart-large-finetuned-squadv1"
+        }"""    
+    parser = argparse.ArgumentParser()
 
-# parser.add_argument('--model_id', '-md', type=str, help='which model to use? Support list: [dist_bert, bert, bart, roberta]')
-# parser.add_argument('--batch_size', type=int, help='batch_size to use')
-# args = parser.parse_args()
+    parser.add_argument('--model_id', '-md', type=str, help='which model to use? Support list: [dist_bert, bert, bart, roberta]')
+    parser.add_argument('--batch_size', type=int, default=12, help='batch_size to use')
+    args = parser.parse_args()
 
-# model_id = args.model_id
+    model_id = args.model_id
 
-model_id = 'dist_bert'
-batch_size = 12
+    model_id = 'dist_bert'
+    batch_size = 12
 
-training_config = {
-    'batch_size': batch_size
-}
+    training_config = {
+        'batch_size': batch_size
+    }
 
-if is_cuda:
+    if is_cuda:
+        try:
+            torch.cuda.empty_cache()
+        except:
+            print("To release CUDA memory with error.")
+            
+    model_id = qa_model_dict.get(model_id)
+
+    print("Start to Download pre-trained model")
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    model = AutoModelForQuestionAnswering.from_pretrained(model_id)
+
+    # put model to GPU
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+
     try:
-        torch.cuda.empty_cache()
-    except:
-        print("To release CUDA memory with error.")
+        model.to(device)
+    except Exception as e:
+        print("When to load model to GPU with error: {}".format(e))
+
+    if not model:
+        print("Couldn't get the model to train, please check the model type!")
+        sys.exit(-1)
+    peft_training = False
+
+    if peft_training:
+        model = get_peft_model_lora_based(model)
         
-model_id = qa_model_dict.get(model_id)
+    dataset = get_train_dataset(json_path='sample.json')
+        
+    train_model(model, tokenizer, dataset=dataset, output_dir=model_id + '_no_peft', training_config=training_config)
 
-print("Start to Download pre-trained model")
-tokenizer = AutoTokenizer.from_pretrained(model_id)
-model = AutoModelForQuestionAnswering.from_pretrained(model_id)
+    # make one sample 
+    question = "How many programming languages does BLOOM support?"
+    context = "BLOOM has 176 billion parameters and can generate text in 46 languages natural languages and 13 programming languages."
 
-# put model to GPU
-device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    answer_str = get_model_prediction(question, context=context, model=model, tokenizer=tokenizer)
+    # Tested is right.
+    print("{}\n Get result: {}".format(question, answer_str))
 
-try:
-    model.to(device)
-except Exception as e:
-    print("When to load model to GPU with error: {}".format(e))
 
-if not model:
-    print("Couldn't get the model to train, please check the model type!")
-    sys.exit(-1)
-peft_training = False
-
-if peft_training:
-    model = get_peft_model_lora_based(model)
-    
-dataset = get_train_dataset(json_path='sample.json')
-    
-train_model(model, tokenizer, dataset=dataset, output_dir=model_id + '_no_peft', training_config=training_config)
-
-# make one sample 
-question = "How many programming languages does BLOOM support?"
-context = "BLOOM has 176 billion parameters and can generate text in 46 languages natural languages and 13 programming languages."
-
-answer_str = get_model_prediction(question, context=context, model=model, tokenizer=tokenizer)
-# Tested is right.
-print("{}\n Get result: {}".format(question, answer_str))
-
-# TODO: there is one thing should be fixed, when to call the model always get the first token string [cls]?
-# is that means for the tokenizer will do the truncation that sometimes for long text that after truncation
-# won't get the real prediction?
-# could be tested.

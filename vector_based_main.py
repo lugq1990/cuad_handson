@@ -87,7 +87,7 @@ def _load_file_content(file_name):
     if not os.path.exists(file_name):
         return []
     with open(file_name, 'r') as f:
-        return [d.strip('\n', '') for d in f.readlines()]
+        return [d.strip('\n') for d in f.readlines()]
     
 
 class NLPProcessor:
@@ -296,7 +296,7 @@ def _dump_model_output(model_output_dict,
     """
     if raw_json_data_file_name:
         print("Start to dump the model final output to disk: ")
-        with open(raw_json_data_file_name, 'a') as f:
+        with open(raw_json_data_file_name, 'a+') as f:
             f.write(json.dumps(model_output_dict))
     if finished:
         # only after the model finished, then dump the result to excel
@@ -308,6 +308,30 @@ def _dump_model_output(model_output_dict,
                     df['extract_clause_correct'] = ''
                     df['is_model_analysis_useful'] = ''
                     df.to_excel(writer, k, index=False)
+                    
+
+def _get_processed_model_output_dict(model_output_dict, filter_words=['ambiguities']):
+    """model_output_dict is a list of file_names as key, the new dict contain the keys with model_response as model output.
+    Logic here is to filter out the model respone with some ambiguities words.
+
+    Args:
+        model_output_dict (list_of_dict): _description_
+    """
+    filter_no_good = 0
+    for file_name, model_dict in model_output_dict.items():
+        print("Now to filter contract: {}".format(file_name))
+        model_response = model_dict.get('model_response', '')
+        # split the response, and to filter the first line that contain the ambiguities words.
+        first_lines =model_response.split('\n')[0]
+        if filter_words in first_lines:
+            filter_no_good += 1
+            # if the model output with some words that we don't want, then just ignore it.
+            # the reason here is that maybe that we haven't extracted clause related text for model.
+            model_response = ''
+            
+        model_dict['model_response'] = model_response
+        model_output_dict[file_name] = model_dic
+    return model_output_dict
 
 
 
@@ -338,29 +362,31 @@ if __name__ == '__main__':
     # Next step is to use this model to get model prediction for full list of contracts, for each clause will get a output
     # then just dump each of them into disk for user next step evaluation.
     model_output_dict = collections.defaultdict(list)
-    finished = False
     
     # only process that file haven't been processed
     already_processed_file_list = _load_file_content(already_processe_file_list_path)
     contract_list = list(set(contract_list) - set(already_processed_file_list))
 
     for i, contract_file in enumerate(contract_list):
+        one_file_dict =  collections.defaultdict(list)
         one_file_start_time = time.time()
         print("Start to process file: {}".format(contract_file))
         print('-'* 100)
-        model_output_dict[contract_file] = []
         clause_list_result = process_one_contract(model=model, contract_file=contract_file, clause_list=clause_list, metadata_path=metadata_path)
-        
-        if i == len(contract_list) - 1:
-            finished = True
+
         print("Start to dump the contract result: {}".format(contract_file))
-        _dump_model_output(model_output_dict=model_output_dict, finished=finished)
+        one_file_dict[contract_file] = clause_list_result
+        model_output_dict[contract_file] = clause_list_result
+        
+        _dump_model_output(model_output_dict=one_file_dict)
+        # used to get which files have been processed.
         _append_to_file(contract_file, file_name=already_processe_file_list_path)
         one_file_end_time = time.time()
         
-        # one file with 41 contract will takes 23 mins to finish
+        # one file with 41 clauses will takes 23 mins to finish
         print("To process one file take: {} mins".format((one_file_end_time - one_file_start_time) / 60))
-    
+    # if we are good to get the finished one, then just write full result to a new file.
+    _dump_model_output(model_output_dict=model_output_dict, raw_json_data_file_name='full_processed_output.json')
     end_time = time.time()
     print("Full process takes: {} mins to process: {} contracts".format((end_time - start_time)/ 60), len(contract_list))
     
